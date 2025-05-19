@@ -7,7 +7,9 @@ import {
   query,
   orderBy,
   doc,
-  getDoc
+  getDoc,
+  getDocs,
+  writeBatch
 } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 import {
   getAuth,
@@ -45,6 +47,7 @@ const sendBtn = document.getElementById("send-btn");
 const chatBox = document.getElementById("chat-box");
 const toggleLoginBtn = document.getElementById("toggle-login");
 const groupSelect = document.getElementById("group-select");
+const clearChatBtn = document.getElementById("clear-chat-btn"); // 🆕
 
 // 👁️ Toggle login container manually
 toggleLoginBtn.addEventListener("click", () => {
@@ -146,7 +149,6 @@ input.addEventListener("keydown", (e) => {
   }
 });
 
-
 // 🔄 Load messages for a specific group
 let unsubscribe = null;
 
@@ -162,7 +164,9 @@ function loadMessagesForGroup(group) {
       const msg = doc.data();
       if (msg.group === group) {
         const div = document.createElement("div");
-        div.innerHTML = `<strong>${msg.username}:</strong> ${msg.text}`;
+        const shortName = msg.username.split('@')[0];
+        div.innerHTML = `<strong>${shortName}:</strong> ${msg.text}`;
+
         chatBox.appendChild(div);
       }
     });
@@ -181,4 +185,41 @@ window.addEventListener("beforeunload", () => {
   signOut(auth).catch((error) => {
     console.error("Auto-logout failed:", error);
   });
+});
+
+// 🗑️ Clear all messages in selected group (if assigned)
+clearChatBtn.addEventListener("click", async () => {
+  const user = auth.currentUser;
+  const selectedGroup = groupSelect.value;
+
+  if (!selectedGroup) return;
+
+  const userDocRef = doc(db, "users", user.uid);
+  const userDoc = await getDoc(userDocRef);
+  const groups = userDoc.exists() ? userDoc.data().groups || [] : [];
+
+  if (!groups.includes(selectedGroup)) {
+    alert("You don't have permission to clear this group.");
+    return;
+  }
+
+  if (!confirm(`Are you sure you want to delete all messages in "${selectedGroup}"?`)) return;
+
+  try {
+    const snapshot = await getDocs(query(messagesRef));
+    const batch = writeBatch(db);
+
+    snapshot.forEach((docSnap) => {
+      const msg = docSnap.data();
+      if (msg.group === selectedGroup) {
+        batch.delete(doc(db, "messages", docSnap.id));
+      }
+    });
+
+    await batch.commit();
+    console.log(`✅ Cleared messages from group: ${selectedGroup}`);
+  } catch (err) {
+    console.error("Error clearing messages:", err);
+    alert("Failed to clear messages.");
+  }
 });
